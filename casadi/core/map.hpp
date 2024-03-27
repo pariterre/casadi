@@ -40,6 +40,8 @@ namespace casadi {
   public:
     // Create function (use instead of constructor)
     static Function create(const std::string& parallelization,
+                           const std::vector<Function>& f);
+    static Function create(const std::string& parallelization,
                            const Function& f, casadi_int n);
 
     /** \brief Destructor
@@ -71,32 +73,32 @@ namespace casadi {
 
         \identifier{h5} */
     Sparsity get_sparsity_in(casadi_int i) override {
-      return repmat(f_.sparsity_in(i), 1, n_);
+      return repmat(f_[0].sparsity_in(i), 1, n_);
     }
     Sparsity get_sparsity_out(casadi_int i) override {
-      return repmat(f_.sparsity_out(i), 1, n_);
+      return repmat(f_[0].sparsity_out(i), 1, n_);
     }
     /// @}
 
     /** \brief Get default input value
 
         \identifier{h6} */
-    double get_default_in(casadi_int ind) const override { return f_.default_in(ind);}
+    double get_default_in(casadi_int ind) const override { return f_[0].default_in(ind);}
 
     ///@{
     /** \brief Number of function inputs and outputs
 
         \identifier{h7} */
-    size_t get_n_in() override { return f_.n_in();}
-    size_t get_n_out() override { return f_.n_out();}
+    size_t get_n_in() override { return f_[0].n_in();}
+    size_t get_n_out() override { return f_[0].n_out();}
     ///@}
 
     ///@{
     /** \brief Names of function input and outputs
 
         \identifier{h8} */
-    std::string get_name_in(casadi_int i) override { return f_.name_in(i);}
-    std::string get_name_out(casadi_int i) override { return f_.name_out(i);}
+    std::string get_name_in(casadi_int i) override { return f_[0].name_in(i);}
+    std::string get_name_out(casadi_int i) override { return f_[0].name_out(i);}
     /// @}
 
     /** \brief  Evaluate or propagate sparsities
@@ -177,7 +179,7 @@ namespace casadi {
     ///@}
 
     /** Obtain information about node */
-    Dict info() const override { return {{"f", f_}, {"n", n_}}; }
+    Dict info() const override { return {{"f", f_[0]}, {"n", n_}}; }
 
     /** \brief Serialize an object without type information
 
@@ -205,10 +207,10 @@ namespace casadi {
     explicit Map(DeserializingStream& s);
 
     // Constructor (protected, use create function)
-    Map(const std::string& name, const Function& f, casadi_int n);
+    Map(const std::string& name, std::vector<Function> f);
 
     // The function which is to be evaluated in parallel
-    Function f_;
+    std::vector<Function> f_;
 
     // Number of times to evaluate this function
     casadi_int n_;
@@ -225,7 +227,7 @@ namespace casadi {
     friend class Map;
   public:
     // Constructor (protected, use create function in Map)
-    OmpMap(const std::string& name, const Function& f, casadi_int n) : Map(name, f, n) {}
+    OmpMap(const std::string& name, std::vector<Function> f) : Map(name, f) {}
 
     /** \brief  Destructor
 
@@ -276,7 +278,7 @@ namespace casadi {
     friend class Map;
   public:
     // Constructor (protected, use create function in Map)
-    ThreadMap(const std::string& name, const Function& f, casadi_int n) : Map(name, f, n) {}
+    ThreadMap(const std::string& name, std::vector<Function> f) : Map(name, f) {}
 
     /** \brief  Destructor
 

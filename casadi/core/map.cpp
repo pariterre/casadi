@@ -36,22 +36,62 @@
 
 namespace casadi {
 
-  Function Map::create(const std::string& parallelization, const Function& f, casadi_int n) {
+  Function Map::create(const std::string& parallelization, const std::vector<Function>& f) {
+    for (casadi_int i=1; i<casadi_int(f.size()); ++i) {
+      // Make sure all the functions share names and dimensions
+      casadi_assert(f[0].name()==f[i].name(), "All functions must have the same name.");
+
+      casadi_assert(f[0].n_in()==f[i].n_in(), "All functions must have the same number of inputs.");
+      for (casadi_int j=0; j<f[0].n_in(); ++j) {
+        casadi_assert(f[0].name_in(i)==f[i].name_in(i), "All functions must have the same name_in.");
+        casadi_assert(f[0].default_in(j)==f[i].default_in(j), "All functions must have the same default in.");
+        casadi_assert(f[0].nnz_in(j)==f[i].nnz_in(j), "All functions must have the same sparsity pattern.");
+        casadi_assert(f[0].is_diff_in()==f[i].is_diff_in(), "All functions must have the same is_diff_in.");
+
+      }
+      casadi_assert(f[0].n_out()==f[i].n_out(), "All functions must have the same number of outputs.");
+      for (casadi_int j=0; j<f[0].n_out(); ++j) {
+        casadi_assert(f[0].name_out(i)==f[i].name_out(i), "All functions must have the same name_out.");
+        casadi_assert(f[0].nnz_out(j)==f[i].nnz_out(j), "All functions must have the same sparsity pattern.");
+        casadi_assert(f[0].is_diff_out()==f[i].is_diff_out(), "All functions must have the same is_diff_out.");
+      }
+
+      casadi_assert(f[0].sz_arg()==f[i].sz_arg(), "All functions must have the same sz_arg.");
+      casadi_assert(f[0].sz_res()==f[i].sz_res(), "All functions must have the same sz_res.");
+      casadi_assert(f[0].sz_w()==f[i].sz_w(), "All functions must have the same sz_w.");
+      casadi_assert(f[0].sz_iw()==f[i].sz_iw(), "All functions must have the same sz_iw.");      
+    }
+
     // Create instance of the right class
-    std::string suffix = str(n) + "_" + f.name();
+    std::string suffix = str(f[0]) + "_" + f[0].name();
     if (parallelization == "serial") {
-      return Function::create(new Map("map" + suffix, f, n), Dict());
+      return Function::create(new Map("map" + suffix, f), Dict());
     } else if (parallelization== "openmp") {
-      return Function::create(new OmpMap("ompmap" + suffix, f, n), Dict());
+      return Function::create(new OmpMap("ompmap" + suffix, f), Dict());
     } else if (parallelization== "thread") {
-      return Function::create(new ThreadMap("threadmap" + suffix, f, n), Dict());
+      return Function::create(new ThreadMap("threadmap" + suffix, f), Dict());
     } else {
       casadi_error("Unknown parallelization: " + parallelization);
     }
   }
 
-  Map::Map(const std::string& name, const Function& f, casadi_int n)
-    : FunctionInternal(name), f_(f), n_(n) {
+  Function Map::create(const std::string& parallelization, const Function& f, casadi_int n) {
+    // Create instance of the right class
+    std::string suffix = str(n) + "_" + f.name();
+    std::vector<Function> fAsList(n, f);
+    if (parallelization == "serial") {
+      return Function::create(new Map("map" + suffix, fAsList), Dict());
+    } else if (parallelization== "openmp") {
+      return Function::create(new OmpMap("ompmap" + suffix, fAsList), Dict());
+    } else if (parallelization== "thread") {
+      return Function::create(new ThreadMap("threadmap" + suffix, fAsList), Dict());
+    } else {
+      casadi_error("Unknown parallelization: " + parallelization);
+    }
+  }
+
+  Map::Map(const std::string& name, std::vector<Function> f)
+    : FunctionInternal(name), f_(f), n_(f.size()) {
   }
 
   bool Map::is_a(const std::string& type, bool recursive) const {
@@ -77,7 +117,8 @@ namespace casadi {
     casadi_assert(has_function(name),
       "No function \"" + name + "\" in " + name_ + ". " +
       "Available functions: " + join(get_function()) + ".");
-    return f_;
+    // TODO check here how we can know the index of the function
+    return f_[0];
   }
 
   bool Map::has_function(const std::string& fname) const {
@@ -86,7 +127,8 @@ namespace casadi {
 
   void Map::serialize_body(SerializingStream &s) const {
     FunctionInternal::serialize_body(s);
-    s.pack("Map::f", f_);
+    // TODO check here how we can know the index of the function
+    s.pack("Map::f", f_[0]);
     s.pack("Map::n", n_);
   }
 
@@ -96,7 +138,8 @@ namespace casadi {
   }
 
   Map::Map(DeserializingStream& s) : FunctionInternal(s) {
-    s.unpack("Map::f", f_);
+    // TODO check here how we can know the index of the function
+    s.unpack("Map::f", f_[0]);
     s.unpack("Map::n", n_);
   }
 
@@ -119,16 +162,16 @@ namespace casadi {
   }
 
   void Map::init(const Dict& opts) {
-    is_diff_in_ = f_.is_diff_in();
-    is_diff_out_ = f_.is_diff_out();
+    is_diff_in_ = f_[0].is_diff_in();
+    is_diff_out_ = f_[0].is_diff_out();
     // Call the initialization method of the base class
     FunctionInternal::init(opts);
 
     // Allocate sufficient memory for serial evaluation
-    alloc_arg(f_.sz_arg());
-    alloc_res(f_.sz_res());
-    alloc_w(f_.sz_w());
-    alloc_iw(f_.sz_iw());
+    alloc_arg(f_[0].sz_arg());
+    alloc_res(f_[0].sz_res());
+    alloc_w(f_[0].sz_w());
+    alloc_iw(f_[0].sz_iw());
   }
 
   template<typename T>
@@ -138,12 +181,12 @@ namespace casadi {
     T** res1 = res+n_out_;
     std::copy_n(res, n_out_, res1);
     for (casadi_int i=0; i<n_; ++i) {
-      if (f_(arg1, res1, iw, w, mem)) return 1;
+      if (f_[i](arg1, res1, iw, w, mem)) return 1;
       for (casadi_int j=0; j<n_in_; ++j) {
-        if (arg1[j]) arg1[j] += f_.nnz_in(j);
+        if (arg1[j]) arg1[j] += f_[i].nnz_in(j);
       }
       for (casadi_int j=0; j<n_out_; ++j) {
-        if (res1[j]) res1[j] += f_.nnz_out(j);
+        if (res1[j]) res1[j] += f_[i].nnz_out(j);
       }
     }
     return 0;
@@ -164,25 +207,28 @@ namespace casadi {
     bvec_t** res1 = res+n_out_;
     std::copy_n(res, n_out_, res1);
     for (casadi_int i=0; i<n_; ++i) {
-      if (f_.rev(arg1, res1, iw, w)) return 1;
+      if (f_[i].rev(arg1, res1, iw, w)) return 1;
       for (casadi_int j=0; j<n_in_; ++j) {
-        if (arg1[j]) arg1[j] += f_.nnz_in(j);
+        if (arg1[j]) arg1[j] += f_[i].nnz_in(j);
       }
       for (casadi_int j=0; j<n_out_; ++j) {
-        if (res1[j]) res1[j] += f_.nnz_out(j);
+        if (res1[j]) res1[j] += f_[i].nnz_out(j);
       }
     }
     return 0;
   }
 
   void Map::codegen_declarations(CodeGenerator& g) const {
-    g.add_dependency(f_);
+    // TODO check here how we can know the index of the function
+    g.add_dependency(f_[0]);
   }
 
   void Map::codegen_body(CodeGenerator& g) const {
     g.local("i", "casadi_int");
     g.local("arg1", "const casadi_real*", "*");
     g.local("res1", "casadi_real*", "*");
+
+    // TODO check here how we can know the index of the function
 
     // Input buffer
     g << "arg1 = arg+" << n_in_ << ";\n"
@@ -192,16 +238,16 @@ namespace casadi {
       << "for (i=0; i<" << n_out_ << "; ++i) res1[i]=res[i];\n"
       << "for (i=0; i<" << n_ << "; ++i) {\n";
     // Evaluate
-    g << "if (" << g(f_, "arg1", "res1", "iw", "w") << ") return 1;\n";
+    g << "if (" << g(f_[0], "arg1", "res1", "iw", "w") << ") return 1;\n";
     // Update input buffers
     for (casadi_int j=0; j<n_in_; ++j) {
-      if (f_.nnz_in(j))
-        g << "if (arg1[" << j << "]) arg1[" << j << "]+=" << f_.nnz_in(j) << ";\n";
+      if (f_[0].nnz_in(j))
+        g << "if (arg1[" << j << "]) arg1[" << j << "]+=" << f_[0].nnz_in(j) << ";\n";
     }
     // Update output buffers
     for (casadi_int j=0; j<n_out_; ++j) {
-      if (f_.nnz_out(j))
-        g << "if (res1[" << j << "]) res1[" << j << "]+=" << f_.nnz_out(j) << ";\n";
+      if (f_[0].nnz_out(j))
+        g << "if (res1[" << j << "]) res1[" << j << "]+=" << f_[0].nnz_out(j) << ";\n";
     }
     g << "}\n";
   }
@@ -212,7 +258,8 @@ namespace casadi {
                 const std::vector<std::string>& onames,
                 const Dict& opts) const {
     // Generate map of derivative
-    Function df = f_.forward(nfwd);
+    // TODO check here how we can know the index of the function
+    Function df = f_[0].forward(nfwd);
     Function dm = df.map(n_, parallelization());
 
     // Input expressions
@@ -223,7 +270,7 @@ namespace casadi {
     std::vector<MX>::iterator it=res.begin()+n_in_+n_out_;
     std::vector<casadi_int> ind;
     for (casadi_int i=0; i<n_in_; ++i, ++it) {
-      casadi_int sz = f_.size2_in(i);
+      casadi_int sz = f_[0].size2_in(i);
       ind.clear();
       for (casadi_int k=0; k<n_; ++k) {
         for (casadi_int d=0; d<nfwd; ++d) {
@@ -241,7 +288,7 @@ namespace casadi {
     // Reorder sensitivity outputs
     it = res.begin();
     for (casadi_int i=0; i<n_out_; ++i, ++it) {
-      casadi_int sz = f_.size2_out(i);
+      casadi_int sz = f_[0].size2_out(i);
       ind.clear();
       for (casadi_int d=0; d<nfwd; ++d) {
         for (casadi_int k=0; k<n_; ++k) {
@@ -266,7 +313,8 @@ namespace casadi {
                 const std::vector<std::string>& onames,
                 const Dict& opts) const {
     // Generate map of derivative
-    Function df = f_.reverse(nadj);
+    // TODO check here how we can know the index of the function
+    Function df = f_[0].reverse(nadj);
     Function dm = df.map(n_, parallelization());
 
     // Input expressions
@@ -277,7 +325,7 @@ namespace casadi {
     std::vector<MX>::iterator it=res.begin()+n_in_+n_out_;
     std::vector<casadi_int> ind;
     for (casadi_int i=0; i<n_out_; ++i, ++it) {
-      casadi_int sz = f_.size2_out(i);
+      casadi_int sz = f_[0].size2_out(i);
       ind.clear();
       for (casadi_int k=0; k<n_; ++k) {
         for (casadi_int d=0; d<nadj; ++d) {
@@ -295,7 +343,7 @@ namespace casadi {
     // Reorder sensitivity outputs
     it = res.begin();
     for (casadi_int i=0; i<n_in_; ++i, ++it) {
-      casadi_int sz = f_.size2_in(i);
+      casadi_int sz = f_[0].size2_in(i);
       ind.clear();
       for (casadi_int d=0; d<nadj; ++d) {
         for (casadi_int k=0; k<n_; ++k) {
@@ -318,7 +366,8 @@ namespace casadi {
     // This checkout/release dance is an optimization.
     // Could also use the thread-safe variant f_(arg1, res1, iw, w)
     // in Map::eval_gen
-    scoped_checkout<Function> m(f_);
+    // TODO check here how we can know the index of the function
+    scoped_checkout<Function> m(f_[0]);
     return eval_gen(arg, res, iw, w, m);
   }
 
@@ -338,7 +387,7 @@ namespace casadi {
 
     // Checkout memory objects
     std::vector< scoped_checkout<Function> > ind; ind.reserve(n_);
-    for (casadi_int i=0; i<n_; ++i) ind.emplace_back(f_);
+    for (casadi_int i=0; i<n_; ++i) ind.emplace_back(f_[i]);
 
     // Evaluate in parallel
 #pragma omp parallel for reduction(||:flag)
@@ -346,18 +395,18 @@ namespace casadi {
       // Input buffers
       const double** arg1 = arg + n_in_ + i*sz_arg;
       for (casadi_int j=0; j<n_in_; ++j) {
-        arg1[j] = arg[j] ? arg[j] + i*f_.nnz_in(j) : 0;
+        arg1[j] = arg[j] ? arg[j] + i*f_[i].nnz_in(j) : 0;
       }
 
       // Output buffers
       double** res1 = res + n_out_ + i*sz_res;
       for (casadi_int j=0; j<n_out_; ++j) {
-        res1[j] = res[j] ? res[j] + i*f_.nnz_out(j) : 0;
+        res1[j] = res[j] ? res[j] + i*f_[i].nnz_out(j) : 0;
       }
 
       // Evaluation
       try {
-        flag = f_(arg1, res1, iw + i*sz_iw, w + i*sz_w, ind[i]) || flag;
+        flag = f_[i](arg1, res1, iw + i*sz_iw, w + i*sz_w, ind[i]) || flag;
       } catch (std::exception& e) {
         flag = 1;
         casadi_warning("Exception raised: " + std::string(e.what()));
@@ -375,7 +424,8 @@ namespace casadi {
 
   void OmpMap::codegen_body(CodeGenerator& g) const {
     size_t sz_arg, sz_res, sz_iw, sz_w;
-    f_.sz_work(sz_arg, sz_res, sz_iw, sz_w);
+    // TODO check here how we can know the index of the function
+    f_[0].sz_work(sz_arg, sz_res, sz_iw, sz_w);
     g << "casadi_int i;\n"
       << "const double** arg1;\n"
       << "double** res1;\n"
@@ -385,15 +435,15 @@ namespace casadi {
       << "arg1 = arg + " << n_in_ << "+i*" << sz_arg << ";\n";
     for (casadi_int j=0; j<n_in_; ++j) {
       g << "arg1[" << j << "] = arg[" << j << "] ? "
-        << g.arg(j) << "+i*" << f_.nnz_in(j) << ": 0;\n";
+        << g.arg(j) << "+i*" << f_[0].nnz_in(j) << ": 0;\n";
     }
     g << "res1 = res + " <<  n_out_ << "+i*" <<  sz_res << ";\n";
     for (casadi_int j=0; j<n_out_; ++j) {
       g << "res1[" << j << "] = res[" << j << "] ?"
-        << g.res(j) << "+i*" << f_.nnz_out(j) << ": 0;\n";
+        << g.res(j) << "+i*" << f_[0].nnz_out(j) << ": 0;\n";
     }
     g << "flag = "
-      << g(f_, "arg1", "res1", "iw+i*" + str(sz_iw), "w+i*" + str(sz_w)) << " || flag;\n"
+      << g(f_[0], "arg1", "res1", "iw+i*" + str(sz_iw), "w+i*" + str(sz_w)) << " || flag;\n"
       << "}\n"
       << "if (flag) return 1;\n";
   }
@@ -410,10 +460,10 @@ namespace casadi {
     alloc_iw(n_, true);
 
     // Allocate sufficient memory for parallel evaluation
-    alloc_arg(f_.sz_arg() * n_);
-    alloc_res(f_.sz_res() * n_);
-    alloc_w(f_.sz_w() * n_);
-    alloc_iw(f_.sz_iw() * n_);
+    alloc_arg(f_[0].sz_arg() * n_);
+    alloc_res(f_[0].sz_res() * n_);
+    alloc_w(f_[0].sz_w() * n_);
+    alloc_iw(f_[0].sz_iw() * n_);
   }
 
 
@@ -465,7 +515,7 @@ namespace casadi {
 #else // CASADI_WITH_THREAD
     // Checkout memory objects
     std::vector< scoped_checkout<Function> > ind; ind.reserve(n_);
-    for (casadi_int i=0; i<n_; ++i) ind.emplace_back(f_);
+    for (casadi_int i=0; i<n_; ++i) ind.emplace_back(f_[i]);
 
     // Allocate space for return values
     std::vector<int> ret_values(n_);
@@ -481,7 +531,7 @@ namespace casadi {
             casadi_int* iw, double* w, casadi_int ind, int& ret) {
               ThreadsWork(f, i, arg, res, iw, w, ind, ret);
             },
-        std::ref(f_), arg, res, iw, w, casadi_int(ind[i]), std::ref(ret_values[i]));
+        std::ref(f_[i]), arg, res, iw, w, casadi_int(ind[i]), std::ref(ret_values[i]));
     }
 
     // Join threads
@@ -513,10 +563,10 @@ namespace casadi {
     alloc_iw(n_, true);
 
     // Allocate sufficient memory for parallel evaluation
-    alloc_arg(f_.sz_arg() * n_);
-    alloc_res(f_.sz_res() * n_);
-    alloc_w(f_.sz_w() * n_);
-    alloc_iw(f_.sz_iw() * n_);
+    alloc_arg(f_[0].sz_arg() * n_);
+    alloc_res(f_[0].sz_res() * n_);
+    alloc_w(f_[0].sz_w() * n_);
+    alloc_iw(f_[0].sz_iw() * n_);
   }
 
 } // namespace casadi
